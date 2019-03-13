@@ -1,0 +1,82 @@
+#自定义函数mlm
+mlm <- function(TR, TE){
+  vname = names(TR) 
+  yn=vname[1]         #因变量名称
+  xn=vname[-1]        #自变量名称
+  mp=length(xn)       #自变量的维数
+  
+  ypr=NULL
+  tm=paste(yn,xn[1],sep="~")     #将因变量y和第一个自变量粘贴成y~x.1的形式，建立lm函数。
+  fam=formula(tm)                #公式化
+  cp=1
+  repeat{
+    lm1 = lm(fam,TR)             #运用公式化后的lm函数对训练集TR做回归，得到相应的回归系数。
+    ypr=c(ypr,predict(lm1,TE))   #给出与之对应的TE的因变量的预测值
+    
+    #使用向前法，依次添加自变量x.2、x.3、……、x.p，重新建立lm函数。
+    if(cp>=mp) break            
+    cp=cp+1                   
+    tm=paste(tm,xn[cp],sep="+") 
+    fam=formula(tm)
+  }
+  as.vector(ypr)                #返回结果为TE的因变量的预测值，其为一个拉直的向量。         
+}
+
+
+library(plyr)
+BV <- function(p, sigma, N, n, k){
+  
+  ##构造两个结构相同的数据集，其中自变量维数均为p，第一个均为因变量
+  #构造样本数为N的测试集dataTE
+  nx <- runif(N,-1,1) #一个样本数为N的均匀分布的随机数
+  ny <- 2*exp(nx)+rnorm(N,0,sigma)                 #真实函数为y = 2*exp(x)+epsilon 其中epsilon~N(0,sigma^2)
+  nz <- matrix(nx,N,p)                             #构造一个自变量矩阵，其中自变量维数为p,样本数为N
+  for(i in 2:p) nz[,i] <- 10*nz[,i]*nz[,i-1]      #乘10为了量纲不要差太多，因为是(0,1)间的，平方会差很多
+  dataTE <- data.frame(y=ny,z=nz)                  
+  
+  #构造样本数为n*k的训练集dataTR
+  x <- runif(n * k,-1,1)
+  y <- 2 * exp(x) + rnorm(n*k,0,sigma)
+  z <- matrix(x,n*k,p)
+  for(i in 2:p) z[,i]=10*z[,i]*z[,i-1];
+  dataTR <- data.frame(y=y,z=z)
+  
+  
+  index <- rep(1:k,rep(n,k)) 
+  
+  ##使用自定义函数mlm，对样本量为n的训练集dataTR做关于自变量x从1到p阶的线性回归
+  ##得到与之对应的关于测试集dataTE的预测。
+  ##重复k次，计算偏差和方差。
+  PRE=daply(dataTR, .(index), mlm, TE = dataTE)     #预测值，为一个k*(N*p)的矩阵
+  b =  ( apply(PRE,2,mean) - rep(2*exp(nx),p) )^2   #(E(h(x))-f(x))^2
+  b = matrix(b, nrow=N, byrow=F)                    #按列排成N*p的矩阵，第j列的对应的回归模型的自变量最高阶数为j
+  b = apply(b, 2, mean)                             #求不同阶数对应的预测函数的偏差，E[(E(h(x))-f(x))^2]
+  v =  apply(PRE, 2, var)                           #var(h(x))
+  v = matrix(v, nrow=N, byrow=F)                    #按列排成N*p的矩阵，第j列的对应的回归模型的自变量最高阶数为j
+  v = apply(v,2,mean)                               #求不同阶数对应的预测函数的方差，E[var(h(x))]                        
+  mse= b+v
+  
+  list(mse=mse, bias=b, var=v)
+  
+}
+
+#定义训练集、测试集的容量、阶数p和sigma的取值
+N=2000; k=2000; n=500
+#N = 10; k = 10; n = 4
+msigma=c(1,5,10)            
+NL=length(msigma)
+ps=cbind(3,msigma)
+
+print(NL)
+print(ps)
+
+#计算不同h(x)的bias和variance
+set.seed(1)
+timestart <- Sys.time()
+
+#每一次循环均为给定一个sigma，使用自定义函数BV计算最高阶数为p时的偏差和方差
+for(nl in 1:NL) print(BV(ps[nl,1],ps[nl,2], N, n, k))
+
+timeend <- Sys.time()
+runningtime <- timeend-timestart
+print(runningtime)                                        #计算运行时间
